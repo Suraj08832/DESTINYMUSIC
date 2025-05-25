@@ -4,7 +4,7 @@ import random
 import requests
 from DESTINYMUSIC import app
 
-SUPPORT_CHAT = "https://t.me/+AzKGhJreNmhiZTll"
+SUPPORT_CHAT = "chamber_of_heart1"
 SUPPORT_BTN = InlineKeyboardMarkup(
     [[InlineKeyboardButton("ꜱᴜᴘᴘᴏʀᴛ", url=f"https://t.me/{SUPPORT_CHAT}")]]
 )
