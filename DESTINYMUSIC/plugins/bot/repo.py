@@ -21,11 +21,11 @@ async def show_repo(_, msg):
         [InlineKeyboardButton("➕ ᴀᴅᴅ ᴍᴇ ʙᴀʙʏ ✨", url=f"https://t.me/{BOT_USERNAME}?startgroup=true")],
         [
             InlineKeyboardButton("👑 ᴏᴡɴᴇʀ", url="https://t.me/crush_hu_tera"),
-            InlineKeyboardButton("💬 ꜱᴜᴘᴘᴏʀᴛ", url="https://t.me/CertifiedCodes")
+            InlineKeyboardButton("💬 ꜱᴜᴘᴘᴏʀᴛ", url="https://t.me/chamber_of_heart1")
         ],
         [
             InlineKeyboardButton("🛠️ ꜱᴜᴘᴘᴏʀᴛ ᴄʜᴀᴛ", url="https://t.me/crush_hu_teras"),
-            InlineKeyboardButton("🎵 ɢɪᴛʜᴜʙ", url="https://github.com/CertifiedCoders/DESTINYXMusic")
+            InlineKeyboardButton("🎵 ɢɪᴛʜᴜʙ", url="https://github.com/DESTINYXMusic")
         ]
     ]
 
