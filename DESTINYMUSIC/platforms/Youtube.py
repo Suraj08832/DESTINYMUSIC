@@ -250,16 +250,16 @@ class YouTubeAPI:
                 return (path, True) if path else (None, None)
             else:
                 proc = await asyncio.create_subprocess_exec(
-                    "yt-dlp",
-                    "--cookies",
-                    cookies_file,
-                    "-g",
-                    "-f",
-                    "best[height<=?720][width<=?1280]",
-                    link,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+                  "yt-dlp",
+                "--cookies",
+                   cookies_file,
+                   "-g",
+                      "-f",
+          "bv*[ext=mp4][height<=720]+ba[ext=m4a]/best[height<=720]/best",
+                 link,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+      )
                 stdout, _ = await proc.communicate()
                 if stdout:
                     return stdout.decode().split("\n")[0], None
