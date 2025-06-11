@@ -4,6 +4,7 @@ import re
 from typing import Dict, List, Optional, Tuple, Union
 
 import yt_dlp
+import aiohttp  # required for API call
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from youtubesearchpython.__future__ import VideosSearch
@@ -15,6 +16,9 @@ from DESTINYMUSIC.utils.formatters import time_to_seconds
 
 cookies_file = "DESTINYMUSIC/assets/cookies.txt"
 _cache = {}
+
+API_URL = "https://youtubeeeer.onrender.com"
+API_KEY = "sandeep_youtube_api"
 
 
 @capture_internal_err
@@ -53,6 +57,21 @@ class YouTubeAPI:
             link = self.base_url + link.split("/")[-1].split("?")[0]
         return link.split("&")[0]
 
+    async def _fetch_from_custom_api(self, query: str) -> Optional[Dict]:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{API_URL}/search",
+                    params={"query": query},
+                    headers={"Authorization": f"Bearer {API_KEY}"}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data.get("result")
+        except Exception as e:
+            print(f"[Custom API] Failed to fetch: {e}")
+        return None
+
     @capture_internal_err
     async def exists(self, link: str, videoid: Union[str, bool, None] = None) -> bool:
         return bool(self._url_pattern.search(self._prepare_link(link, videoid)))
@@ -73,11 +92,26 @@ class YouTubeAPI:
     @capture_internal_err
     async def _fetch_video_info(self, query: str, *, use_cache: bool = True) -> Optional[Dict]:
         if use_cache and not query.startswith("http"):
-            result = await cached_youtube_search(query)
-        else:
+            if query in _cache:
+                return _cache[query][0]
+
+            api_result = await self._fetch_from_custom_api(query)
+            if api_result:
+                _cache[query] = [api_result]
+                return api_result
+
             search = VideosSearch(query, limit=1)
             result = (await search.next()).get("result", [])
-        return result[0] if result else None
+            if result:
+                _cache[query] = result
+                return result[0]
+
+        elif query.startswith("http"):
+            search = VideosSearch(query, limit=1)
+            result = (await search.next()).get("result", [])
+            return result[0] if result else None
+
+        return None
 
     @capture_internal_err
     async def is_live(self, link: str) -> bool:
