@@ -17,8 +17,8 @@ from DESTINYMUSIC.utils.formatters import time_to_seconds
 cookies_file = "DESTINYMUSIC/assets/cookies.txt"
 _cache = {}
 
-API_URL = "https://youtubeeeer.onrender.com"
-API_KEY = "sandeep_youtube_api"
+API_URL = "https://my-api-lc2j.onrender.com"
+API_KEY =  "zefron_api_key"
 
 
 @capture_internal_err
