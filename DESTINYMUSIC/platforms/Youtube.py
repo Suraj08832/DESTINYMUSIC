@@ -34,21 +34,6 @@ class YouTubeAPI:
         try:
             print(f"[Custom API] Fetching data for query: {query}")
             async with aiohttp.ClientSession() as session:
-                # First try to get video info directly if it's a video ID
-                if query.startswith("http") or len(query) == 11:  # YouTube video IDs are 11 characters
-                    print(f"[Custom API] Attempting to fetch video info directly")
-                    async with session.get(
-                        f"{self.base_url}/video",
-                        params={"id": query},
-                        headers={"Authorization": f"Bearer {API_KEY}"}
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data.get("result"):
-                                return data.get("result")
-                
-                # If direct fetch fails or it's a search query, try search endpoint
-                print(f"[Custom API] Attempting search endpoint")
                 async with session.get(
                     f"{self.base_url}/search",
                     params={"query": query},
@@ -57,11 +42,25 @@ class YouTubeAPI:
                     print(f"[Custom API] Response status: {resp.status}")
                     if resp.status == 200:
                         data = await resp.json()
-                        print(f"[Custom API] Response data: {data}")
-                        if not data.get("result"):
-                            print("[Custom API] No result found in response")
+                        print(f"[Custom API] Raw response data: {data}")
+                        
+                        # Handle different possible response formats
+                        if isinstance(data, list) and len(data) > 0:
+                            # If response is a list, take the first item
+                            return data[0]
+                        elif isinstance(data, dict):
+                            if "result" in data:
+                                return data["result"]
+                            elif "data" in data:
+                                return data["data"]
+                            elif "items" in data and len(data["items"]) > 0:
+                                return data["items"][0]
+                            else:
+                                # If the response itself is the result
+                                return data
+                        else:
+                            print("[Custom API] Unexpected response format")
                             return None
-                        return data.get("result")
                     else:
                         error_text = await resp.text()
                         print(f"[Custom API] Error response: {error_text}")
@@ -172,15 +171,22 @@ class YouTubeAPI:
                 print("[Track] No info found")
                 raise ValueError("Track not found")
 
+            # Handle different possible response formats
+            video_id = info.get("id") or info.get("videoId") or info.get("video_id")
+            title = info.get("title") or info.get("name")
+            duration = info.get("duration") or info.get("duration_min")
+            thumbnail = info.get("thumbnail") or info.get("thumb") or info.get("thumbnailUrl")
+            webpage_url = info.get("webpage_url") or info.get("url") or info.get("link")
+
             details = {
-                "title": info.get("title", ""),
-                "link": info.get("webpage_url", ""),
-                "vidid": info.get("id", ""),
-                "duration_min": info.get("duration"),
-                "thumb": info.get("thumbnail", ""),
+                "title": title or "",
+                "link": webpage_url or "",
+                "vidid": video_id or "",
+                "duration_min": duration,
+                "thumb": thumbnail or "",
             }
             print(f"[Track] Prepared details: {details}")
-            return details, info.get("id", "")
+            return details, video_id or ""
         except Exception as e:
             print(f"[Track] Error: {str(e)}")
             raise ValueError(f"Track not found: {str(e)}")
