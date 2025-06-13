@@ -32,18 +32,43 @@ class YouTubeAPI:
 
     async def _fetch_from_custom_api(self, query: str) -> Optional[Dict]:
         try:
+            print(f"[Custom API] Fetching data for query: {query}")
             async with aiohttp.ClientSession() as session:
+                # First try to get video info directly if it's a video ID
+                if query.startswith("http") or len(query) == 11:  # YouTube video IDs are 11 characters
+                    print(f"[Custom API] Attempting to fetch video info directly")
+                    async with session.get(
+                        f"{self.base_url}/video",
+                        params={"id": query},
+                        headers={"Authorization": f"Bearer {API_KEY}"}
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data.get("result"):
+                                return data.get("result")
+                
+                # If direct fetch fails or it's a search query, try search endpoint
+                print(f"[Custom API] Attempting search endpoint")
                 async with session.get(
                     f"{self.base_url}/search",
                     params={"query": query},
                     headers={"Authorization": f"Bearer {API_KEY}"}
                 ) as resp:
+                    print(f"[Custom API] Response status: {resp.status}")
                     if resp.status == 200:
                         data = await resp.json()
+                        print(f"[Custom API] Response data: {data}")
+                        if not data.get("result"):
+                            print("[Custom API] No result found in response")
+                            return None
                         return data.get("result")
+                    else:
+                        error_text = await resp.text()
+                        print(f"[Custom API] Error response: {error_text}")
+                        return None
         except Exception as e:
-            print(f"[Custom API] Failed to fetch: {e}")
-        return None
+            print(f"[Custom API] Failed to fetch: {str(e)}")
+            return None
 
     @capture_internal_err
     async def exists(self, link: str, videoid: Union[str, bool, None] = None) -> bool:
@@ -135,18 +160,30 @@ class YouTubeAPI:
 
     @capture_internal_err
     async def track(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[Dict, str]:
-        info = await self._fetch_video_info(self._prepare_link(link, videoid))
-        if not info:
-            raise ValueError("Track not found")
+        try:
+            print(f"[Track] Processing link: {link}, videoid: {videoid}")
+            prepared_link = self._prepare_link(link, videoid)
+            print(f"[Track] Prepared link: {prepared_link}")
+            
+            info = await self._fetch_video_info(prepared_link)
+            print(f"[Track] Fetched info: {info}")
+            
+            if not info:
+                print("[Track] No info found")
+                raise ValueError("Track not found")
 
-        details = {
-            "title": info.get("title", ""),
-            "link": info.get("webpage_url", ""),
-            "vidid": info.get("id", ""),
-            "duration_min": info.get("duration"),
-            "thumb": info.get("thumbnail", ""),
-        }
-        return details, info.get("id", "")
+            details = {
+                "title": info.get("title", ""),
+                "link": info.get("webpage_url", ""),
+                "vidid": info.get("id", ""),
+                "duration_min": info.get("duration"),
+                "thumb": info.get("thumbnail", ""),
+            }
+            print(f"[Track] Prepared details: {details}")
+            return details, info.get("id", "")
+        except Exception as e:
+            print(f"[Track] Error: {str(e)}")
+            raise ValueError(f"Track not found: {str(e)}")
 
     @capture_internal_err
     async def formats(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[List[Dict], str]:
