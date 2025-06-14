@@ -214,8 +214,10 @@ class YouTubeAPI:
                         params={"query": video_id},
                         headers={"Authorization": f"Bearer {API_KEY}"}
                     ) as resp:
+                        print(f"[Track] URL search response status: {resp.status}")
                         if resp.status == 200:
                             data = await resp.json()
+                            print(f"[Track] URL search response: {data}")
                             if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
                                 info = data["result"][0]
                                 thumb = info.get("thumbnail", "").split("?")[0]
@@ -230,26 +232,38 @@ class YouTubeAPI:
             else:
                 # Handle search query (song name)
                 print(f"[Track] Processing search query: {prepared_link}")
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"{API_URL}/search",
-                        params={"query": prepared_link},
-                        headers={"Authorization": f"Bearer {API_KEY}"}
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
-                                # Get the first result from search
-                                info = data["result"][0]
-                                thumb = info.get("thumbnail", "").split("?")[0]
-                                details = {
-                                    "title": info.get("title", ""),
-                                    "link": info.get("webpage_url", prepared_link),
-                                    "vidid": info.get("id", ""),
-                                    "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                                    "thumb": thumb,
-                                }
-                                return details, info.get("id", "")
+                # Try multiple search variations
+                search_queries = [
+                    prepared_link,  # Original query
+                    f"{prepared_link} audio",  # Add audio keyword
+                    f"{prepared_link} official",  # Add official keyword
+                    f"{prepared_link} song"  # Add song keyword
+                ]
+                
+                for query in search_queries:
+                    print(f"[Track] Trying search query: {query}")
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            f"{API_URL}/search",
+                            params={"query": query},
+                            headers={"Authorization": f"Bearer {API_KEY}"}
+                        ) as resp:
+                            print(f"[Track] Search response status: {resp.status}")
+                            if resp.status == 200:
+                                data = await resp.json()
+                                print(f"[Track] Search response: {data}")
+                                if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
+                                    # Get the first result from search
+                                    info = data["result"][0]
+                                    thumb = info.get("thumbnail", "").split("?")[0]
+                                    details = {
+                                        "title": info.get("title", ""),
+                                        "link": info.get("webpage_url", prepared_link),
+                                        "vidid": info.get("id", ""),
+                                        "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                                        "thumb": thumb,
+                                    }
+                                    return details, info.get("id", "")
 
             # If direct search fails, try cached search
             print(f"[Track] Attempting cached search for: {prepared_link}")
