@@ -3,23 +3,19 @@ import json
 import re
 from typing import Dict, List, Optional, Tuple, Union
 
-import yt_dlp
-import aiohttp  # required for API call
+import aiohttp
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
-from youtubesearchpython.__future__ import VideosSearch
 
 from DESTINYMUSIC.utils.database import is_on_off
-from DESTINYMUSIC.utils.downloader import yt_dlp_download, download_audio_concurrent
+from DESTINYMUSIC.utils.downloader import download_audio, download_video
 from DESTINYMUSIC.utils.errors import capture_internal_err
 from DESTINYMUSIC.utils.formatters import time_to_seconds
 
-cookies_file = "DESTINYMUSIC/assets/cookies.txt"
-_cache = {}
-
 API_URL = "https://my-api-lc2j.onrender.com"
-API_KEY =  "zefron_api_key"
+API_KEY = "zefron_api_key"
 
+_cache = {}
 
 @capture_internal_err
 async def shell_cmd(cmd: str) -> str:
@@ -29,18 +25,27 @@ async def shell_cmd(cmd: str) -> str:
     out, err = await proc.communicate()
     return (out or err).decode()
 
-
 @capture_internal_err
 async def cached_youtube_search(query: str) -> List[Dict]:
     if query in _cache:
         return _cache[query]
-    search = VideosSearch(query, limit=1)
-    results = await search.next()
-    result_data = results.get("result", [])
-    if result_data:
-        _cache[query] = result_data
-    return result_data
-
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{API_URL}/search",
+                params={"query": query},
+                headers={"Authorization": f"Bearer {API_KEY}"}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    result_data = data.get("result", [])
+                    if result_data:
+                        _cache[query] = result_data
+                    return result_data
+    except Exception as e:
+        print(f"[Custom API] Search failed: {e}")
+    return []
 
 class YouTubeAPI:
     def __init__(self) -> None:
@@ -67,7 +72,7 @@ class YouTubeAPI:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        return data.get("result")
+                        return data.get("result", [{}])[0]
         except Exception as e:
             print(f"[Custom API] Failed to fetch: {e}")
         return None
@@ -100,34 +105,28 @@ class YouTubeAPI:
                 _cache[query] = [api_result]
                 return api_result
 
-            search = VideosSearch(query, limit=1)
-            result = (await search.next()).get("result", [])
-            if result:
-                _cache[query] = result
-                return result[0]
-
         elif query.startswith("http"):
-            search = VideosSearch(query, limit=1)
-            result = (await search.next()).get("result", [])
-            return result[0] if result else None
+            api_result = await self._fetch_from_custom_api(query)
+            if api_result:
+                return api_result
 
         return None
 
     @capture_internal_err
     async def is_live(self, link: str) -> bool:
-        prepared = self._prepare_link(link)
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--cookies", cookies_file, "--dump-json", prepared,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await proc.communicate()
-        if not stdout:
-            return False
         try:
-            info = json.loads(stdout.decode())
-            return bool(info.get("is_live"))
-        except json.JSONDecodeError:
-            return False
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{API_URL}/info",
+                    params={"url": link},
+                    headers={"Authorization": f"Bearer {API_KEY}"}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data.get("is_live", False)
+        except Exception as e:
+            print(f"[Custom API] Failed to check live status: {e}")
+        return False
 
     @capture_internal_err
     async def details(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[str, Optional[str], int, str, str]:
@@ -136,7 +135,7 @@ class YouTubeAPI:
             raise ValueError("Video not found")
         duration_text = info.get("duration")
         duration_sec = int(time_to_seconds(duration_text)) if duration_text else 0
-        thumb = (info.get("thumbnail") or info.get("thumbnails", [{}])[0].get("url", "")).split("?")[0]
+        thumb = info.get("thumbnail", "").split("?")[0]
         return (
             info.get("title", ""),
             duration_text,
@@ -158,29 +157,43 @@ class YouTubeAPI:
     @capture_internal_err
     async def thumbnail(self, link: str, videoid: Union[str, bool, None] = None) -> str:
         info = await self._fetch_video_info(self._prepare_link(link, videoid))
-        return (info.get("thumbnail") or info.get("thumbnails", [{}])[0].get("url", "")).split("?")[0] if info else ""
+        return info.get("thumbnail", "").split("?")[0] if info else ""
 
     @capture_internal_err
     async def video(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[int, str]:
         link = self._prepare_link(link, videoid)
-        proc = await asyncio.create_subprocess_exec(
-            "yt-dlp", "--cookies", cookies_file, "-g", "-f", "best[height<=?720][width<=?1280]",
-            link, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-        return (1, stdout.decode().split("\n")[0]) if stdout else (0, stderr.decode())
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{API_URL}/video",
+                    params={"url": link},
+                    headers={"Authorization": f"Bearer {API_KEY}"}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return (1, data.get("url", ""))
+        except Exception as e:
+            print(f"[Custom API] Failed to get video URL: {e}")
+        return (0, "Failed to get video URL")
 
     @capture_internal_err
     async def playlist(self, link: str, limit: int, user_id, videoid: Union[str, bool, None] = None) -> List[str]:
         if videoid:
             link = self.playlist_url + str(videoid)
         link = link.split("&")[0]
-        cmd = (
-            f"yt-dlp --cookies {cookies_file} -i --get-id --flat-playlist "
-            f"--playlist-end {limit} --skip-download {link}"
-        )
-        data = await shell_cmd(cmd)
-        return [item for item in data.strip().split("\n") if item]
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{API_URL}/playlist",
+                    params={"url": link, "limit": limit},
+                    headers={"Authorization": f"Bearer {API_KEY}"}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data.get("videos", [])
+        except Exception as e:
+            print(f"[Custom API] Failed to get playlist: {e}")
+        return []
 
     @capture_internal_err
     async def track(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[Dict, str]:
@@ -188,21 +201,11 @@ class YouTubeAPI:
             info = await self._fetch_video_info(self._prepare_link(link, videoid))
             if not info:
                 raise ValueError("Track not found via API")
-        except Exception:
-            prepared = self._prepare_link(link, videoid)
-            proc = await asyncio.create_subprocess_exec(
-                "yt-dlp", "--cookies", cookies_file, "--dump-json", prepared,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await proc.communicate()
-            if not stdout:
-                raise ValueError("Track not found (yt-dlp fallback)")
-            try:
-                info = json.loads(stdout.decode())
-            except json.JSONDecodeError:
-                raise ValueError("Failed to parse yt-dlp output")
+        except Exception as e:
+            print(f"[Custom API] Failed to get track info: {e}")
+            raise ValueError("Track not found")
 
-        thumb = (info.get("thumbnail") or info.get("thumbnails", [{}])[0].get("url", "")).split("?")[0]
+        thumb = info.get("thumbnail", "").split("?")[0]
         details = {
             "title": info.get("title", ""),
             "link": info.get("webpage_url", self._prepare_link(link, videoid)),
@@ -215,40 +218,45 @@ class YouTubeAPI:
     @capture_internal_err
     async def formats(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[List[Dict], str]:
         link = self._prepare_link(link, videoid)
-        opts = {"quiet": True, "cookiefile": cookies_file}
-        formats: List[Dict] = []
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(link, download=False)
-                for fmt in info.get("formats", []):
-                    if "dash" in fmt.get("format", "").lower():
-                        continue
-                    if all(k in fmt for k in ("format", "filesize", "format_id", "ext", "format_note")):
-                        formats.append({
-                            "format": fmt["format"],
-                            "filesize": fmt["filesize"],
-                            "format_id": fmt["format_id"],
-                            "ext": fmt["ext"],
-                            "format_note": fmt["format_note"],
-                            "yturl": link,
-                        })
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{API_URL}/formats",
+                    params={"url": link},
+                    headers={"Authorization": f"Bearer {API_KEY}"}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        formats = data.get("formats", [])
+                        return formats, link
         except Exception as e:
-            print(f"[formats()] yt-dlp error: {e}")
-        return formats, link
+            print(f"[Custom API] Failed to get formats: {e}")
+        return [], link
 
     @capture_internal_err
     async def slider(self, link: str, query_type: int, videoid: Union[str, bool, None] = None) -> Tuple[str, Optional[str], str, str]:
-        search = VideosSearch(self._prepare_link(link, videoid), limit=10)
-        results = (await search.next()).get("result", [])
-        if not results or query_type >= len(results):
-            raise IndexError(f"Query type index {query_type} out of range (found {len(results)} results)")
-        res = results[query_type]
-        return (
-            res.get("title", ""),
-            res.get("duration"),
-            res.get("thumbnails", [{}])[0].get("url", "").split("?")[0],
-            res.get("id", ""),
-        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{API_URL}/search",
+                    params={"query": self._prepare_link(link, videoid), "limit": 10},
+                    headers={"Authorization": f"Bearer {API_KEY}"}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        results = data.get("result", [])
+                        if not results or query_type >= len(results):
+                            raise IndexError(f"Query type index {query_type} out of range (found {len(results)} results)")
+                        res = results[query_type]
+                        return (
+                            res.get("title", ""),
+                            res.get("duration"),
+                            res.get("thumbnail", "").split("?")[0],
+                            res.get("id", ""),
+                        )
+        except Exception as e:
+            print(f"[Custom API] Failed to get slider: {e}")
+        raise IndexError("Failed to get slider results")
 
     @capture_internal_err
     async def download(
@@ -265,39 +273,29 @@ class YouTubeAPI:
     ) -> Union[Tuple[str, Optional[bool]], Tuple[None, None]]:
         link = self._prepare_link(link, videoid)
 
-        if songvideo:
-            path = await yt_dlp_download(link, type="song_video", format_id=format_id, title=title)
-            return (path, True) if path else (None, None)
-
-        if songaudio:
-            path = await yt_dlp_download(link, type="song_audio", format_id=format_id, title=title)
-            return (path, True) if path else (None, None)
-
-        if video:
-            if await self.is_live(link):
-                status, stream_url = await self.video(link)
-                if status == 1:
-                    return stream_url, None
-                raise ValueError("Unable to fetch live stream link")
-            if await is_on_off(1):
-                path = await yt_dlp_download(link, type="video")
+        try:
+            if songvideo:
+                path = await download_video(link, format_id)
                 return (path, True) if path else (None, None)
-            else:
-                proc = await asyncio.create_subprocess_exec(
-                    "yt-dlp",
-                    "--cookies",
-                    cookies_file,
-                    "-g",
-                    "-f",
-                    "best[height<=?720][width<=?1280]",
-                    link,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                stdout, _ = await proc.communicate()
-                if stdout:
-                    return stdout.decode().split("\n")[0], None
-                return None, None
 
-        path = await download_audio_concurrent(link)
-        return (path, True) if path else (None, None)
+            elif songaudio:
+                path = await download_audio(link)
+                return (path, True) if path else (None, None)
+
+            elif video:
+                if await self.is_live(link):
+                    status, stream_url = await self.video(link)
+                    if status == 1:
+                        return stream_url, None
+                    raise ValueError("Unable to fetch live stream link")
+                
+                path = await download_video(link)
+                return (path, True) if path else (None, None)
+
+            else:
+                path = await download_audio(link)
+                return (path, True) if path else (None, None)
+
+        except Exception as e:
+            print(f"[Download Error] {e}")
+            return None, None
