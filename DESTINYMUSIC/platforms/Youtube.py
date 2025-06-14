@@ -211,45 +211,83 @@ class YouTubeAPI:
                         print(f"[Track] Search response status for '{query}': {resp.status}")
                         if resp.status == 200:
                             data = await resp.json()
-                            print(f"[Track] Search response for '{query}': {data}")
+                            print(f"[Track] Raw API response for '{query}': {data}")
                             
                             # Handle different response formats
                             if isinstance(data, dict):
                                 # Format 1: {"result": [...]}
                                 if "result" in data and isinstance(data["result"], list) and len(data["result"]) > 0:
                                     info = data["result"][0]
+                                    print(f"[Track] Found result in 'result' array: {info}")
                                     return create_track_details(info, prepared_link)
                                 
                                 # Format 2: Direct result array
                                 elif isinstance(data.get("data"), list) and len(data["data"]) > 0:
                                     info = data["data"][0]
+                                    print(f"[Track] Found result in 'data' array: {info}")
                                     return create_track_details(info, prepared_link)
                                 
                                 # Format 3: Direct video info
                                 elif all(key in data for key in ["title", "id"]):
+                                    print(f"[Track] Found direct video info: {data}")
                                     return create_track_details(data, prepared_link)
+                                
+                                # Format 4: {"videos": [...]}
+                                elif "videos" in data and isinstance(data["videos"], list) and len(data["videos"]) > 0:
+                                    info = data["videos"][0]
+                                    print(f"[Track] Found result in 'videos' array: {info}")
+                                    return create_track_details(info, prepared_link)
+                                
+                                # Format 5: {"items": [...]}
+                                elif "items" in data and isinstance(data["items"], list) and len(data["items"]) > 0:
+                                    info = data["items"][0]
+                                    print(f"[Track] Found result in 'items' array: {info}")
+                                    return create_track_details(info, prepared_link)
                             
-                            # Format 4: Direct array of results
+                            # Format 6: Direct array of results
                             elif isinstance(data, list) and len(data) > 0:
                                 info = data[0]
+                                print(f"[Track] Found result in direct array: {info}")
                                 return create_track_details(info, prepared_link)
                             
                             print(f"[Track] Unrecognized response format for '{query}': {data}")
             except Exception as e:
                 print(f"[Track] Error searching for '{query}': {str(e)}")
+                import traceback
+                print(f"[Track] Error traceback: {traceback.format_exc()}")
             return None
 
         def create_track_details(info: Dict, link: str) -> Tuple[Dict, str]:
-            thumb = info.get("thumbnail", "").split("?")[0]
-            details = {
-                "title": info.get("title", ""),
-                "link": info.get("webpage_url", link),
-                "vidid": info.get("id", ""),
-                "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                "thumb": thumb,
-            }
-            print(f"[Track] Created details: {details}")
-            return details, info.get("id", "")
+            try:
+                # Handle different thumbnail formats
+                thumb = ""
+                if "thumbnail" in info:
+                    thumb = info["thumbnail"].split("?")[0]
+                elif "thumbnails" in info and isinstance(info["thumbnails"], list) and len(info["thumbnails"]) > 0:
+                    thumb = info["thumbnails"][0].get("url", "").split("?")[0]
+                elif "thumb" in info:
+                    thumb = info["thumb"].split("?")[0]
+
+                # Handle different ID formats
+                vid_id = info.get("id", "") or info.get("videoId", "") or info.get("video_id", "")
+
+                # Handle different URL formats
+                video_url = info.get("webpage_url", "") or info.get("url", "") or info.get("link", "") or link
+
+                details = {
+                    "title": info.get("title", ""),
+                    "link": video_url,
+                    "vidid": vid_id,
+                    "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                    "thumb": thumb,
+                }
+                print(f"[Track] Created details: {details}")
+                return details, vid_id
+            except Exception as e:
+                print(f"[Track] Error creating track details: {str(e)}")
+                import traceback
+                print(f"[Track] Error traceback: {traceback.format_exc()}")
+                raise
 
         try:
             # Check if the input is a YouTube URL or just a search query
