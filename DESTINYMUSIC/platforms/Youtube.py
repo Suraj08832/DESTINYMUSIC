@@ -200,14 +200,16 @@ class YouTubeAPI:
         try:
             # First try to get info directly from the API
             async with aiohttp.ClientSession() as session:
+                # Use the /search endpoint since /song is returning 404
                 async with session.get(
-                    f"{API_URL}/info",
-                    params={"url": self._prepare_link(link, videoid)},
+                    f"{API_URL}/search",
+                    params={"query": self._prepare_link(link, videoid)},
                     headers={"Authorization": f"Bearer {API_KEY}"}
                 ) as resp:
                     if resp.status == 200:
-                        info = await resp.json()
-                        if info and isinstance(info, dict):
+                        data = await resp.json()
+                        if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
+                            info = data["result"][0]
                             thumb = info.get("thumbnail", "").split("?")[0]
                             details = {
                                 "title": info.get("title", ""),
@@ -314,12 +316,34 @@ class YouTubeAPI:
 
         try:
             if songvideo:
-                path = await download_video(link, format_id)
-                return (path, True) if path else (None, None)
+                # Use /search endpoint to get video info first
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{API_URL}/search",
+                        params={"query": link},
+                        headers={"Authorization": f"Bearer {API_KEY}"}
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data and "result" in data and len(data["result"]) > 0:
+                                video_info = data["result"][0]
+                                path = await download_video(video_info["id"], format_id)
+                                return (path, True) if path else (None, None)
 
             elif songaudio:
-                path = await download_audio(link)
-                return (path, True) if path else (None, None)
+                # Use /search endpoint to get audio info first
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{API_URL}/search",
+                        params={"query": link},
+                        headers={"Authorization": f"Bearer {API_KEY}"}
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data and "result" in data and len(data["result"]) > 0:
+                                audio_info = data["result"][0]
+                                path = await download_audio(audio_info["id"])
+                                return (path, True) if path else (None, None)
 
             elif video:
                 if await self.is_live(link):
@@ -328,12 +352,34 @@ class YouTubeAPI:
                         return stream_url, None
                     raise ValueError("Unable to fetch live stream link")
                 
-                path = await download_video(link)
-                return (path, True) if path else (None, None)
+                # Use /search endpoint to get video info first
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{API_URL}/search",
+                        params={"query": link},
+                        headers={"Authorization": f"Bearer {API_KEY}"}
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data and "result" in data and len(data["result"]) > 0:
+                                video_info = data["result"][0]
+                                path = await download_video(video_info["id"])
+                                return (path, True) if path else (None, None)
 
             else:
-                path = await download_audio(link)
-                return (path, True) if path else (None, None)
+                # Use /search endpoint to get audio info first
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{API_URL}/search",
+                        params={"query": link},
+                        headers={"Authorization": f"Bearer {API_KEY}"}
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data and "result" in data and len(data["result"]) > 0:
+                                audio_info = data["result"][0]
+                                path = await download_audio(audio_info["id"])
+                                return (path, True) if path else (None, None)
 
         except Exception as e:
             print(f"[Download Error] {e}")
