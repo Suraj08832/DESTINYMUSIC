@@ -252,24 +252,35 @@ class YouTubeAPI:
                             if resp.status == 200:
                                 data = await resp.json()
                                 print(f"[Track] Search response: {data}")
-                                if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
-                                    # Get the first result from search
-                                    info = data["result"][0]
-                                    thumb = info.get("thumbnail", "").split("?")[0]
-                                    details = {
-                                        "title": info.get("title", ""),
-                                        "link": info.get("webpage_url", prepared_link),
-                                        "vidid": info.get("id", ""),
-                                        "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                                        "thumb": thumb,
-                                    }
-                                    return details, info.get("id", "")
+                                if data and isinstance(data, dict):
+                                    if "result" in data:
+                                        if len(data["result"]) > 0:
+                                            info = data["result"][0]
+                                            print(f"[Track] Found video info: {info}")
+                                            thumb = info.get("thumbnail", "").split("?")[0]
+                                            details = {
+                                                "title": info.get("title", ""),
+                                                "link": info.get("webpage_url", prepared_link),
+                                                "vidid": info.get("id", ""),
+                                                "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                                                "thumb": thumb,
+                                            }
+                                            print(f"[Track] Returning details: {details}")
+                                            return details, info.get("id", "")
+                                        else:
+                                            print(f"[Track] No results found in response: {data}")
+                                    else:
+                                        print(f"[Track] No 'result' key in response: {data}")
+                                else:
+                                    print(f"[Track] Invalid response format: {data}")
 
             # If direct search fails, try cached search
             print(f"[Track] Attempting cached search for: {prepared_link}")
             search_results = await cached_youtube_search(prepared_link)
+            print(f"[Track] Cached search results: {search_results}")
             if search_results and len(search_results) > 0:
                 info = search_results[0]
+                print(f"[Track] Found video info from cache: {info}")
                 thumb = info.get("thumbnail", "").split("?")[0]
                 details = {
                     "title": info.get("title", ""),
@@ -278,6 +289,7 @@ class YouTubeAPI:
                     "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
                     "thumb": thumb,
                 }
+                print(f"[Track] Returning details from cache: {details}")
                 return details, info.get("id", "")
 
             print(f"[Track] All search attempts failed for: {prepared_link}")
