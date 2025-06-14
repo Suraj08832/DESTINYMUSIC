@@ -197,63 +197,83 @@ class YouTubeAPI:
 
     @capture_internal_err
     async def track(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[Dict, str]:
+        prepared_link = self._prepare_link(link, videoid)
+        print(f"[Track] Processing link: {prepared_link}")
+
         try:
-            # First try to get info directly from the API
-            async with aiohttp.ClientSession() as session:
-                # Use the /search endpoint since /song is returning 404
-                async with session.get(
-                    f"{API_URL}/search",
-                    params={"query": self._prepare_link(link, videoid)},
-                    headers={"Authorization": f"Bearer {API_KEY}"}
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
-                            info = data["result"][0]
-                            thumb = info.get("thumbnail", "").split("?")[0]
-                            details = {
-                                "title": info.get("title", ""),
-                                "link": info.get("webpage_url", self._prepare_link(link, videoid)),
-                                "vidid": info.get("id", ""),
-                                "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                                "thumb": thumb,
-                            }
-                            return details, info.get("id", "")
+            # Check if the input is a YouTube URL or just a search query
+            is_youtube_url = "youtube.com" in prepared_link or "youtu.be" in prepared_link
+            
+            if is_youtube_url:
+                # Handle YouTube URL
+                print(f"[Track] Processing YouTube URL: {prepared_link}")
+                video_id = prepared_link.split("v=")[-1] if "v=" in prepared_link else prepared_link.split("/")[-1]
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{API_URL}/search",
+                        params={"query": video_id},
+                        headers={"Authorization": f"Bearer {API_KEY}"}
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
+                                info = data["result"][0]
+                                thumb = info.get("thumbnail", "").split("?")[0]
+                                details = {
+                                    "title": info.get("title", ""),
+                                    "link": info.get("webpage_url", prepared_link),
+                                    "vidid": info.get("id", ""),
+                                    "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                                    "thumb": thumb,
+                                }
+                                return details, info.get("id", "")
+            else:
+                # Handle search query (song name)
+                print(f"[Track] Processing search query: {prepared_link}")
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{API_URL}/search",
+                        params={"query": prepared_link},
+                        headers={"Authorization": f"Bearer {API_KEY}"}
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
+                                # Get the first result from search
+                                info = data["result"][0]
+                                thumb = info.get("thumbnail", "").split("?")[0]
+                                details = {
+                                    "title": info.get("title", ""),
+                                    "link": info.get("webpage_url", prepared_link),
+                                    "vidid": info.get("id", ""),
+                                    "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                                    "thumb": thumb,
+                                }
+                                return details, info.get("id", "")
 
-            # If direct API call fails, try searching
-            info = await self._fetch_video_info(self._prepare_link(link, videoid))
-            if not info:
-                raise ValueError("Track not found via API")
+            # If direct search fails, try cached search
+            print(f"[Track] Attempting cached search for: {prepared_link}")
+            search_results = await cached_youtube_search(prepared_link)
+            if search_results and len(search_results) > 0:
+                info = search_results[0]
+                thumb = info.get("thumbnail", "").split("?")[0]
+                details = {
+                    "title": info.get("title", ""),
+                    "link": info.get("webpage_url", prepared_link),
+                    "vidid": info.get("id", ""),
+                    "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                    "thumb": thumb,
+                }
+                return details, info.get("id", "")
 
-            thumb = info.get("thumbnail", "").split("?")[0]
-            details = {
-                "title": info.get("title", ""),
-                "link": info.get("webpage_url", self._prepare_link(link, videoid)),
-                "vidid": info.get("id", ""),
-                "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                "thumb": thumb,
-            }
-            return details, info.get("id", "")
+            print(f"[Track] All search attempts failed for: {prepared_link}")
+            raise ValueError("Track not found via API")
 
         except Exception as e:
-            print(f"[Custom API] Track fetch failed: {e}")
-            # Try one last time with search
-            try:
-                search_results = await cached_youtube_search(self._prepare_link(link, videoid))
-                if search_results and len(search_results) > 0:
-                    info = search_results[0]
-                    thumb = info.get("thumbnail", "").split("?")[0]
-                    details = {
-                        "title": info.get("title", ""),
-                        "link": info.get("webpage_url", self._prepare_link(link, videoid)),
-                        "vidid": info.get("id", ""),
-                        "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                        "thumb": thumb,
-                    }
-                    return details, info.get("id", "")
-            except Exception as search_error:
-                print(f"[Custom API] Search fallback failed: {search_error}")
-            
+            print(f"[Track] Error occurred: {str(e)}")
+            print(f"[Track] Error type: {type(e)}")
+            import traceback
+            print(f"[Track] Traceback: {traceback.format_exc()}")
             raise ValueError("Track not found")
 
     @capture_internal_err
