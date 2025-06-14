@@ -198,22 +198,61 @@ class YouTubeAPI:
     @capture_internal_err
     async def track(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[Dict, str]:
         try:
+            # First try to get info directly from the API
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{API_URL}/info",
+                    params={"url": self._prepare_link(link, videoid)},
+                    headers={"Authorization": f"Bearer {API_KEY}"}
+                ) as resp:
+                    if resp.status == 200:
+                        info = await resp.json()
+                        if info and isinstance(info, dict):
+                            thumb = info.get("thumbnail", "").split("?")[0]
+                            details = {
+                                "title": info.get("title", ""),
+                                "link": info.get("webpage_url", self._prepare_link(link, videoid)),
+                                "vidid": info.get("id", ""),
+                                "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                                "thumb": thumb,
+                            }
+                            return details, info.get("id", "")
+
+            # If direct API call fails, try searching
             info = await self._fetch_video_info(self._prepare_link(link, videoid))
             if not info:
                 raise ValueError("Track not found via API")
-        except Exception as e:
-            print(f"[Custom API] Failed to get track info: {e}")
-            raise ValueError("Track not found")
 
-        thumb = info.get("thumbnail", "").split("?")[0]
-        details = {
-            "title": info.get("title", ""),
-            "link": info.get("webpage_url", self._prepare_link(link, videoid)),
-            "vidid": info.get("id", ""),
-            "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-            "thumb": thumb,
-        }
-        return details, info.get("id", "")
+            thumb = info.get("thumbnail", "").split("?")[0]
+            details = {
+                "title": info.get("title", ""),
+                "link": info.get("webpage_url", self._prepare_link(link, videoid)),
+                "vidid": info.get("id", ""),
+                "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                "thumb": thumb,
+            }
+            return details, info.get("id", "")
+
+        except Exception as e:
+            print(f"[Custom API] Track fetch failed: {e}")
+            # Try one last time with search
+            try:
+                search_results = await cached_youtube_search(self._prepare_link(link, videoid))
+                if search_results and len(search_results) > 0:
+                    info = search_results[0]
+                    thumb = info.get("thumbnail", "").split("?")[0]
+                    details = {
+                        "title": info.get("title", ""),
+                        "link": info.get("webpage_url", self._prepare_link(link, videoid)),
+                        "vidid": info.get("id", ""),
+                        "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                        "thumb": thumb,
+                    }
+                    return details, info.get("id", "")
+            except Exception as search_error:
+                print(f"[Custom API] Search fallback failed: {search_error}")
+            
+            raise ValueError("Track not found")
 
     @capture_internal_err
     async def formats(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[List[Dict], str]:
