@@ -200,6 +200,57 @@ class YouTubeAPI:
         prepared_link = self._prepare_link(link, videoid)
         print(f"[Track] Processing link: {prepared_link}")
 
+        async def search_with_query(query: str) -> Optional[Tuple[Dict, str]]:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{API_URL}/search",
+                        params={"query": query},
+                        headers={"Authorization": f"Bearer {API_KEY}"}
+                    ) as resp:
+                        print(f"[Track] Search response status for '{query}': {resp.status}")
+                        if resp.status == 200:
+                            data = await resp.json()
+                            print(f"[Track] Search response for '{query}': {data}")
+                            
+                            # Handle different response formats
+                            if isinstance(data, dict):
+                                # Format 1: {"result": [...]}
+                                if "result" in data and isinstance(data["result"], list) and len(data["result"]) > 0:
+                                    info = data["result"][0]
+                                    return create_track_details(info, prepared_link)
+                                
+                                # Format 2: Direct result array
+                                elif isinstance(data.get("data"), list) and len(data["data"]) > 0:
+                                    info = data["data"][0]
+                                    return create_track_details(info, prepared_link)
+                                
+                                # Format 3: Direct video info
+                                elif all(key in data for key in ["title", "id"]):
+                                    return create_track_details(data, prepared_link)
+                            
+                            # Format 4: Direct array of results
+                            elif isinstance(data, list) and len(data) > 0:
+                                info = data[0]
+                                return create_track_details(info, prepared_link)
+                            
+                            print(f"[Track] Unrecognized response format for '{query}': {data}")
+            except Exception as e:
+                print(f"[Track] Error searching for '{query}': {str(e)}")
+            return None
+
+        def create_track_details(info: Dict, link: str) -> Tuple[Dict, str]:
+            thumb = info.get("thumbnail", "").split("?")[0]
+            details = {
+                "title": info.get("title", ""),
+                "link": info.get("webpage_url", link),
+                "vidid": info.get("id", ""),
+                "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
+                "thumb": thumb,
+            }
+            print(f"[Track] Created details: {details}")
+            return details, info.get("id", "")
+
         try:
             # Check if the input is a YouTube URL or just a search query
             is_youtube_url = "youtube.com" in prepared_link or "youtu.be" in prepared_link
@@ -208,89 +259,40 @@ class YouTubeAPI:
                 # Handle YouTube URL
                 print(f"[Track] Processing YouTube URL: {prepared_link}")
                 video_id = prepared_link.split("v=")[-1] if "v=" in prepared_link else prepared_link.split("/")[-1]
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"{API_URL}/search",
-                        params={"query": video_id},
-                        headers={"Authorization": f"Bearer {API_KEY}"}
-                    ) as resp:
-                        print(f"[Track] URL search response status: {resp.status}")
-                        if resp.status == 200:
-                            data = await resp.json()
-                            print(f"[Track] URL search response: {data}")
-                            if data and isinstance(data, dict) and "result" in data and len(data["result"]) > 0:
-                                info = data["result"][0]
-                                thumb = info.get("thumbnail", "").split("?")[0]
-                                details = {
-                                    "title": info.get("title", ""),
-                                    "link": info.get("webpage_url", prepared_link),
-                                    "vidid": info.get("id", ""),
-                                    "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                                    "thumb": thumb,
-                                }
-                                return details, info.get("id", "")
+                result = await search_with_query(video_id)
+                if result:
+                    return result
             else:
                 # Handle search query (song name)
                 print(f"[Track] Processing search query: {prepared_link}")
+                
                 # Try multiple search variations
                 search_queries = [
                     prepared_link,  # Original query
                     f"{prepared_link} audio",  # Add audio keyword
                     f"{prepared_link} official",  # Add official keyword
-                    f"{prepared_link} song"  # Add song keyword
+                    f"{prepared_link} song",  # Add song keyword
+                    f"{prepared_link} music",  # Add music keyword
+                    f"{prepared_link} lyrics"  # Add lyrics keyword
                 ]
                 
+                # Try each search variation
                 for query in search_queries:
                     print(f"[Track] Trying search query: {query}")
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(
-                            f"{API_URL}/search",
-                            params={"query": query},
-                            headers={"Authorization": f"Bearer {API_KEY}"}
-                        ) as resp:
-                            print(f"[Track] Search response status: {resp.status}")
-                            if resp.status == 200:
-                                data = await resp.json()
-                                print(f"[Track] Search response: {data}")
-                                if data and isinstance(data, dict):
-                                    if "result" in data:
-                                        if len(data["result"]) > 0:
-                                            info = data["result"][0]
-                                            print(f"[Track] Found video info: {info}")
-                                            thumb = info.get("thumbnail", "").split("?")[0]
-                                            details = {
-                                                "title": info.get("title", ""),
-                                                "link": info.get("webpage_url", prepared_link),
-                                                "vidid": info.get("id", ""),
-                                                "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                                                "thumb": thumb,
-                                            }
-                                            print(f"[Track] Returning details: {details}")
-                                            return details, info.get("id", "")
-                                        else:
-                                            print(f"[Track] No results found in response: {data}")
-                                    else:
-                                        print(f"[Track] No 'result' key in response: {data}")
-                                else:
-                                    print(f"[Track] Invalid response format: {data}")
+                    result = await search_with_query(query)
+                    if result:
+                        return result
 
             # If direct search fails, try cached search
             print(f"[Track] Attempting cached search for: {prepared_link}")
-            search_results = await cached_youtube_search(prepared_link)
-            print(f"[Track] Cached search results: {search_results}")
-            if search_results and len(search_results) > 0:
-                info = search_results[0]
-                print(f"[Track] Found video info from cache: {info}")
-                thumb = info.get("thumbnail", "").split("?")[0]
-                details = {
-                    "title": info.get("title", ""),
-                    "link": info.get("webpage_url", prepared_link),
-                    "vidid": info.get("id", ""),
-                    "duration_min": info.get("duration") if isinstance(info.get("duration"), str) else None,
-                    "thumb": thumb,
-                }
-                print(f"[Track] Returning details from cache: {details}")
-                return details, info.get("id", "")
+            try:
+                search_results = await cached_youtube_search(prepared_link)
+                print(f"[Track] Cached search results: {search_results}")
+                if search_results and len(search_results) > 0:
+                    info = search_results[0]
+                    return create_track_details(info, prepared_link)
+            except Exception as e:
+                print(f"[Track] Error during cached search: {str(e)}")
 
             print(f"[Track] All search attempts failed for: {prepared_link}")
             raise ValueError("Track not found via API")
