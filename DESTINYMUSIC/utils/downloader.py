@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 import aiofiles
 from typing import Optional, Dict, Any
-from ..config import API_URL, API_KEY
+from DESTINYMUSIC.config import API_URL, API_KEY
 
 async def download_audio(url: str, output_path: str) -> Optional[str]:
     """Download audio from YouTube URL using yt-dlp"""
